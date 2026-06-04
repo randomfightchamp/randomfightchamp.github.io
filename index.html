@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Визуальный рандомайзер для определения победителя среди участников через серию случайных мини-игр">
+    <title>Случайные Соревнования</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Экран 1: Сбор команды -->
+        <div id="team-screen" class="screen active">
+            <h1>Случайные Соревнования</h1>
+            <div class="setup-container">
+                <div class="player-count-control">
+                    <label for="player-count">Количество участников:</label>
+                    <div class="counter">
+                        <button id="decrease-btn" class="counter-btn">-</button>
+                        <input type="number" id="player-count" min="2" max="100" value="20">
+                        <button id="increase-btn" class="counter-btn">+</button>
+                    </div>
+                </div>
+                
+                <div class="players-list" id="players-list">
+                    <!-- Карточки игроков будут добавлены здесь -->
+                </div>
+                
+                <button id="start-games-btn" class="btn-primary">К выбору игр</button>
+            </div>
+        </div>
+
+        <!-- Экран 2: Выбор игры -->
+        <div id="games-screen" class="screen">
+            <h1>Выберите игру</h1>
+            <div class="games-grid" id="games-grid">
+                <!-- Карточки игр будут добавлены здесь -->
+            </div>
+            <button id="back-to-team-btn" class="btn-secondary">Назад</button>
+        </div>
+
+        <!-- Экран 3: Арена -->
+        <div id="arena-screen" class="screen">
+            <div class="arena-container">
+                <div class="players-panel" id="players-panel">
+                    <h2>Участники</h2>
+                    <div class="alive-players" id="alive-players">
+                        <!-- Живые участники будут отображаться здесь -->
+                    </div>
+                    <div class="eliminated-players" id="eliminated-players">
+                        <!-- Выбывшие участники будут отображаться здесь -->
+                    </div>
+                </div>
+                
+                <div class="game-area">
+                    <div class="game-header">
+                        <div class="timer" id="timer">00:00</div>
+                        <div class="escalation-indicator" id="escalation-indicator">⚡ НОРМАЛЬНО ⚡</div>
+                    </div>
+                    
+                    <canvas id="game-canvas"></canvas>
+                    
+                    <div class="game-controls">
+                        <button id="stop-restart-btn" class="btn-secondary">Остановить / Рестарт</button>
+                        <button id="mute-btn" class="btn-secondary">🔊</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Модальное окно победителя -->
+            <div id="winner-modal" class="modal">
+                <div class="modal-content">
+                    <h2>🏆 Победитель! 🏆</h2>
+                    <p id="winner-name">Имя победителя</p>
+                    <button id="play-again-btn" class="btn-primary">Сыграть ещё раз</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+    <script src="games/iceSumo.js"></script>
+    <script src="games/bulletStorm.js"></script>
+    <script src="games/cellularFission.js"></script>
+    <script src="games/gridColony.js"></script>
+    <script src="games/polygonRoulette.js"></script>
+    <script src="players.js"></script>
+    <script src="gameManager.js"></script>
+    <script src="main.js"></script>
+    <script>
+        // Глобальные переменные для доступа к играм
+        window.IceSumoGame = IceSumoGame;
+        window.BulletStormGame = BulletStormGame;
+        window.CellularFissionGame = CellularFissionGame;
+        window.GridColonyGame = GridColonyGame;
+        window.PolygonRouletteGame = PolygonRouletteGame;
+    </script>
+</body>
+</html>
