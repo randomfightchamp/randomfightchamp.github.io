@@ -17,6 +17,8 @@ const PolygonRouletteGame = {
     MARGIN: 35,
     BALL_RADIUS: 7,
     MAX_BALL_SPEED: 500,
+    ELIMINATION_BANNER_DURATION: 5000,
+    LABEL_OFFSET: 28,
     
     // Состояние игры
     arena: null,
@@ -33,6 +35,9 @@ const PolygonRouletteGame = {
     particles: [],
     isPaused: false,
     isEscalated: false,
+    escalationVisualUntil: 0,
+    lastEliminated: null,
+    lastEliminatedAt: 0,
     roundPauseTimer: 0,
     lastTime: 0,
     
@@ -53,6 +58,9 @@ const PolygonRouletteGame = {
         }));
         
         this.lastTime = performance.now();
+        this.lastEliminated = null;
+        this.lastEliminatedAt = 0;
+        this.escalationVisualUntil = 0;
         this.createPolygons();
         this.resetBall();
         
@@ -62,13 +70,15 @@ const PolygonRouletteGame = {
     
     createPolygons() {
         const alivePlayers = this.players.filter(p => p.isAlive);
-        const outerSides = Math.max(2, alivePlayers.length);
+        const outerSides = alivePlayers.length === 2 ? 4 : Math.max(3, alivePlayers.length);
+        const outerRadius = this.getOuterRadius();
+        const innerRadius = this.getInnerRadiusForOuter(outerRadius, outerSides);
         
         // Малый многоугольник (внутри, постоянное число граней)
         this.innerPolygon = {
             cx: this.arena.centerX,
             cy: this.arena.centerY,
-            radius: this.INNER_R,
+            radius: innerRadius,
             sides: this.INNER_SIDES,
             rotation: 0,
             rotSpeed: this.INNER_ROT_SPEED,
@@ -81,15 +91,15 @@ const PolygonRouletteGame = {
         if (alivePlayers.length === 2) {
             // Квадрат с двумя игроками (по две грани у каждого)
             edges = [
-                { playerIdx: 0, active: true },
-                { playerIdx: 1, active: true },
-                { playerIdx: 0, active: true },
-                { playerIdx: 1, active: true }
+                { playerId: alivePlayers[0].id, active: true },
+                { playerId: alivePlayers[1].id, active: true },
+                { playerId: alivePlayers[0].id, active: true },
+                { playerId: alivePlayers[1].id, active: true }
             ];
         } else {
             // Обычный случай
-            edges = alivePlayers.map((_, idx) => ({
-                playerIdx: idx,
+            edges = alivePlayers.map(player => ({
+                playerId: player.id,
                 active: true
             }));
         }
@@ -97,12 +107,22 @@ const PolygonRouletteGame = {
         this.outerPolygon = {
             cx: this.arena.centerX,
             cy: this.arena.centerY,
-            radius: this.OUTER_R,
+            radius: outerRadius,
             sides: edges.length,
             rotation: 0,
             rotSpeed: this.OUTER_ROT_SPEED,
             edges: edges
         };
+    },
+    
+    getOuterRadius() {
+        return this.OUTER_R;
+    },
+    
+    getInnerRadiusForOuter(outerRadius, outerSides) {
+        // Внутренний 30-угольник должен помещаться во внешний многоугольник.
+        const outerInradius = outerRadius * Math.cos(Math.PI / outerSides);
+        return Math.max(80, Math.min(this.INNER_R, outerInradius - this.MARGIN));
     },
     
     resetBall() {
@@ -126,12 +146,16 @@ const PolygonRouletteGame = {
         if (this.isPaused) return;
         
         const now = Date.now();
+        if (this.isEscalated && now > this.escalationVisualUntil) {
+            this.isEscalated = false;
+        }
         
         // Обработка состояния подготовки
         if (this.gameState === 'preparation') {
             if (now - this.prepStartTime > 2000) { // 2 секунды подготовки
                 this.gameState = 'running';
                 this.roundStartTime = now;
+                this.ball.trail = [];
             }
             return;
         }
@@ -257,7 +281,8 @@ const PolygonRouletteGame = {
     
     checkBallOuterCollision() {
         for (let i = 0; i < this.outerPolygon.sides; i++) {
-            if (!this.outerPolygon.edges[i].active) continue;
+            const edge = this.outerPolygon.edges[i];
+            if (!edge.active) continue;
             
             // Вычисляем вершины грани
             const angle1 = this.outerPolygon.rotation + (2 * Math.PI * i / this.outerPolygon.sides);
@@ -281,11 +306,10 @@ const PolygonRouletteGame = {
             
             if (distance < this.ball.radius) {
                 // Игрок выбывает
-                const playerIdx = this.outerPolygon.edges[i].playerIdx;
-                const alivePlayers = this.players.filter(p => p.isAlive);
+                const playerToEliminate = this.getAlivePlayerById(edge.playerId);
                 
-                if (playerIdx >= 0 && playerIdx < alivePlayers.length) {
-                    const playerToEliminate = alivePlayers[playerIdx];
+                if (playerToEliminate) {
+                    edge.active = false;
                     this.triggerDeath(playerToEliminate);
                     return true; // Успешный вылет
                 }
@@ -313,14 +337,18 @@ const PolygonRouletteGame = {
         const sectorIdx = Math.floor((angle - this.outerPolygon.rotation + 2 * Math.PI) % (2 * Math.PI) / sectorAngle);
         
         if (sectorIdx >= 0 && sectorIdx < this.outerPolygon.sides) {
-            const playerIdx = this.outerPolygon.edges[sectorIdx].playerIdx;
-            const alivePlayers = this.players.filter(p => p.isAlive);
+            const edge = this.outerPolygon.edges[sectorIdx];
+            const playerToEliminate = edge && this.getAlivePlayerById(edge.playerId);
             
-            if (playerIdx >= 0 && playerIdx < alivePlayers.length) {
-                const playerToEliminate = alivePlayers[playerIdx];
+            if (edge && playerToEliminate) {
+                edge.active = false;
                 this.triggerDeath(playerToEliminate);
             }
         }
+    },
+    
+    getAlivePlayerById(playerId) {
+        return this.players.find(player => player.id === playerId && player.isAlive);
     },
     
     getClosestPointOnSegment(px, py, ax, ay, bx, by) {
@@ -339,13 +367,23 @@ const PolygonRouletteGame = {
     },
     
     triggerDeath(player) {
+        if (!player || !player.isAlive) return;
+        
         // Отметка как мертвого
         player.isAlive = false;
         player.place = this.players.filter(p => !p.isAlive).length;
+        this.lastEliminated = player;
+        this.lastEliminatedAt = Date.now();
         
         // Вызов коллбэка менеджера игры
         if (this.gameManager) {
             this.gameManager.eliminatePlayer(player.id);
+        }
+        
+        const alivePlayers = this.players.filter(p => p.isAlive);
+        if (alivePlayers.length <= 1) {
+            this.gameState = 'ending';
+            return;
         }
         
         // Начало паузы между раундами
@@ -356,8 +394,9 @@ const PolygonRouletteGame = {
     startNextRound() {
         this.createPolygons(); // Обновляем внешний многоугольник
         this.resetBall(); // Сбрасываем шарик
-        this.gameState = 'running';
         this.roundNumber++;
+        this.gameState = 'preparation';
+        this.prepStartTime = Date.now();
         this.roundStartTime = Date.now();
     },
     
@@ -413,27 +452,25 @@ const PolygonRouletteGame = {
         
         // Рисуем внешний многоугольник (большой)
         for (let i = 0; i < this.outerPolygon.sides; i++) {
-            if (!this.outerPolygon.edges[i].active) continue;
+            const edge = this.outerPolygon.edges[i];
+            if (!edge.active) continue;
             
             const angle1 = this.outerPolygon.rotation + (2 * Math.PI * i / this.outerPolygon.sides);
             const angle2 = this.outerPolygon.rotation + (2 * Math.PI * (i + 1) / this.outerPolygon.sides);
             
             const p1 = {
-                x: centerX + Math.cos(angle1) * this.OUTER_R,
-                y: centerY + Math.sin(angle1) * this.OUTER_R
+                x: centerX + Math.cos(angle1) * this.outerPolygon.radius,
+                y: centerY + Math.sin(angle1) * this.outerPolygon.radius
             };
             
             const p2 = {
-                x: centerX + Math.cos(angle2) * this.OUTER_R,
-                y: centerY + Math.sin(angle2) * this.OUTER_R
+                x: centerX + Math.cos(angle2) * this.outerPolygon.radius,
+                y: centerY + Math.sin(angle2) * this.outerPolygon.radius
             };
             
-            const playerIdx = this.outerPolygon.edges[i].playerIdx;
-            const alivePlayers = this.players.filter(p => p.isAlive);
+            const player = this.players.find(p => p.id === edge.playerId);
             
-            if (playerIdx >= 0 && playerIdx < alivePlayers.length) {
-                const player = alivePlayers[playerIdx];
-                
+            if (player) {
                 ctx.beginPath();
                 ctx.moveTo(p1.x, p1.y);
                 ctx.lineTo(p2.x, p2.y);
@@ -446,14 +483,16 @@ const PolygonRouletteGame = {
                 ctx.shadowBlur = 15;
                 ctx.stroke();
                 ctx.shadowBlur = 0;
+                
+                this.drawOuterLabel(ctx, player, angle1, angle2, centerX, centerY);
             }
         }
         
         // Рисуем разделители секторов внешнего многоугольника
         for (let i = 0; i < this.outerPolygon.sides; i++) {
             const angle = this.outerPolygon.rotation + (2 * Math.PI * i / this.outerPolygon.sides);
-            const endX = centerX + Math.cos(angle) * this.OUTER_R;
-            const endY = centerY + Math.sin(angle) * this.OUTER_R;
+            const endX = centerX + Math.cos(angle) * this.outerPolygon.radius;
+            const endY = centerY + Math.sin(angle) * this.outerPolygon.radius;
             
             ctx.beginPath();
             ctx.moveTo(centerX, centerY);
@@ -471,13 +510,13 @@ const PolygonRouletteGame = {
             const angle2 = this.innerPolygon.rotation + (2 * Math.PI * (i + 1) / this.innerPolygon.sides);
             
             const p1 = {
-                x: centerX + Math.cos(angle1) * this.INNER_R,
-                y: centerY + Math.sin(angle1) * this.INNER_R
+                x: centerX + Math.cos(angle1) * this.innerPolygon.radius,
+                y: centerY + Math.sin(angle1) * this.innerPolygon.radius
             };
             
             const p2 = {
-                x: centerX + Math.cos(angle2) * this.INNER_R,
-                y: centerY + Math.sin(angle2) * this.INNER_R
+                x: centerX + Math.cos(angle2) * this.innerPolygon.radius,
+                y: centerY + Math.sin(angle2) * this.innerPolygon.radius
             };
             
             ctx.beginPath();
@@ -574,7 +613,7 @@ const PolygonRouletteGame = {
             ctx.fillText(`РАУНД ${this.roundNumber}`, centerX, centerY - 50);
             
             ctx.font = '24px Arial';
-            ctx.fillText(`ИЗ ${this.players.length}`, centerX, centerY + 10);
+            ctx.fillText(`ОСТАЛОСЬ ${this.players.filter(p => p.isAlive).length}`, centerX, centerY + 10);
         }
         
         // Состояние паузы между раундами
@@ -584,7 +623,15 @@ const PolygonRouletteGame = {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(`РАУНД ${this.roundNumber}`, centerX, centerY);
+            
+            if (this.lastEliminated) {
+                ctx.font = 'bold 28px Arial';
+                ctx.fillStyle = this.lastEliminated.color;
+                ctx.fillText(`Выбыл: ${this.lastEliminated.name}`, centerX, centerY + 48);
+            }
         }
+        
+        this.drawEliminationBanner(ctx, centerX);
         
         // Состояние завершения
         if (this.gameState === 'ending') {
@@ -609,6 +656,54 @@ const PolygonRouletteGame = {
         this.outerPolygon.cy = originalOuterCy;
     },
     
+    drawOuterLabel(ctx, player, angle1, angle2, centerX, centerY) {
+        const midAngle = (angle1 + angle2) / 2;
+        const labelRadius = this.outerPolygon.radius + this.LABEL_OFFSET;
+        const x = centerX + Math.cos(midAngle) * labelRadius;
+        const y = centerY + Math.sin(midAngle) * labelRadius;
+        let rotation = midAngle + Math.PI / 2;
+        const normalizedRotation = ((rotation % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        
+        // Переворачиваем подпись на нижней половине, чтобы имя оставалось читаемым.
+        if (normalizedRotation > Math.PI / 2 && normalizedRotation < Math.PI * 1.5) {
+            rotation += Math.PI;
+        }
+        
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
+        ctx.font = 'bold 13px Arial';
+        ctx.fillStyle = 'rgba(210, 210, 220, 0.55)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(player.name, 0, 0, 90);
+        ctx.restore();
+    },
+    
+    drawEliminationBanner(ctx, centerX) {
+        if (!this.lastEliminated) return;
+        
+        const age = Date.now() - this.lastEliminatedAt;
+        const isRoundPause = this.gameState === 'round_pause' || this.gameState === 'preparation' || this.gameState === 'ending';
+        if (age > this.ELIMINATION_BANNER_DURATION && !isRoundPause) return;
+        
+        const alpha = isRoundPause ? 1 : Math.max(0, 1 - age / this.ELIMINATION_BANNER_DURATION);
+        
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(10, 10, 24, 0.75)';
+        ctx.fillRect(centerX - 160, 18, 320, 36);
+        ctx.strokeStyle = this.lastEliminated.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(centerX - 160, 18, 320, 36);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`Выбыл: ${this.lastEliminated.name}`, centerX, 25);
+        ctx.restore();
+    },
+    
     onEscalation() {
         // Сбиваем случайные активные грани внутреннего многоугольника
         const activeInnerEdges = [];
@@ -619,7 +714,7 @@ const PolygonRouletteGame = {
         }
         
         // Сбиваем до 5 случайных активных граней, но оставляем минимум 8
-        const edgesToBreak = Math.min(5, activeInnerEdges.length - 8, activeInnerEdges.length);
+        const edgesToBreak = Math.max(0, Math.min(5, activeInnerEdges.length - 8, activeInnerEdges.length));
         for (let i = 0; i < edgesToBreak; i++) {
             const randomIndex = Math.floor(Math.random() * activeInnerEdges.length);
             const edgeIndex = activeInnerEdges[randomIndex];
@@ -632,7 +727,7 @@ const PolygonRouletteGame = {
         if (this.ball) {
             const speed = Math.sqrt(this.ball.vx * this.ball.vx + this.ball.vy * this.ball.vy);
             if (speed > 0) {
-                const normalizedSpeed = Math.min(speed, this.MAX_BALL_SPEED);
+                const normalizedSpeed = Math.min(speed * 1.25, this.MAX_BALL_SPEED);
                 this.ball.vx = (this.ball.vx / speed) * normalizedSpeed;
                 this.ball.vy = (this.ball.vy / speed) * normalizedSpeed;
             }
@@ -643,11 +738,7 @@ const PolygonRouletteGame = {
         
         // Включаем режим эскалации для визуального эффекта
         this.isEscalated = true;
-        
-        // Через некоторое время выключаем визуальный эффект
-        setTimeout(() => {
-            this.isEscalated = false;
-        }, 3000);
+        this.escalationVisualUntil = Date.now() + 3000;
     },
     
     pause() {
@@ -669,6 +760,9 @@ const PolygonRouletteGame = {
         this.prepStartTime = Date.now();
         this.roundNumber = 1;
         this.isEscalated = false;
+        this.escalationVisualUntil = 0;
+        this.lastEliminated = null;
+        this.lastEliminatedAt = 0;
         this.BALL_SPEED = 260; // сброс скорости
         this.innerPolygon.rotSpeed = this.INNER_ROT_SPEED; // сброс скорости вращения
         

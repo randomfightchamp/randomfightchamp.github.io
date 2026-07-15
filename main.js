@@ -24,6 +24,7 @@ class App {
         // Кнопки
         this.startGamesBtn = document.getElementById('start-games-btn');
         this.backToTeamBtn = document.getElementById('back-to-team-btn');
+        this.arenaStartBtn = document.getElementById('arena-start-btn');
         this.stopRestartBtn = document.getElementById('stop-restart-btn');
         this.playAgainBtn = document.getElementById('play-again-btn');
         this.muteBtn = document.getElementById('mute-btn');
@@ -85,6 +86,15 @@ class App {
         
         this.backToTeamBtn.addEventListener('click', () => {
             this.switchScreen('team');
+        });
+        
+        this.arenaStartBtn.addEventListener('click', () => {
+            if (this.gameManager) {
+                this.gameManager.start();
+                this.arenaStartBtn.disabled = true;
+                this.arenaStartBtn.textContent = 'Игра идет';
+                this.arenaStartBtn.classList.add('disabled');
+            }
         });
         
         this.stopRestartBtn.addEventListener('click', () => {
@@ -203,48 +213,86 @@ class App {
     }
     
     startGame(gameModule) {
+        this.switchScreen('arena');
+        this.resetArenaControls();
+        
         // Инициализируем Game Manager с текущими игроками
         this.gameManager = new GameManager(
             [...this.players], 
             this.canvas, 
             gameModule,
             (winner) => this.showWinner(winner),
-            (time, escalation) => this.updateGameUI(time, escalation)
+            (time, escalation) => this.updateGameUI(time, escalation),
+            () => this.updatePlayersPanel()
         );
         
         this.gameManager.init();
-        this.switchScreen('arena');
         this.updatePlayersPanel();
+    }
+    
+    resetArenaControls() {
+        this.winnerModal.classList.remove('active');
+        this.timerElement.textContent = '00:00';
+        this.escalationIndicator.textContent = '⚡ ОЖИДАНИЕ ⚡';
+        this.escalationIndicator.style.background = '#555';
+        this.arenaStartBtn.disabled = false;
+        this.arenaStartBtn.textContent = 'Старт';
+        this.arenaStartBtn.classList.remove('disabled');
     }
     
     updatePlayersPanel() {
         this.alivePlayersPanel.innerHTML = '';
         this.eliminatedPlayersPanel.innerHTML = '';
+        const players = this.gameManager ? this.gameManager.players : this.players;
+        const alivePlayers = players.filter(player => !player.eliminated && player.alive !== false);
+        const eliminatedPlayers = players
+            .filter(player => player.eliminated || player.alive === false)
+            .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
         
-        this.players.forEach(player => {
+        alivePlayers.forEach(player => {
             const playerItem = document.createElement('div');
-            playerItem.className = `player-item ${player.eliminated ? 'eliminated' : ''}`;
+            playerItem.className = 'player-item';
             
             playerItem.innerHTML = `
                 <div class="player-color" style="background-color: ${player.color}"></div>
                 <div class="player-info">
-                    ${player.eliminated ? `${player.name} (${player.rank})` : player.name}
+                    ${player.name}
                 </div>
             `;
             
-            if (player.eliminated) {
-                this.eliminatedPlayersPanel.appendChild(playerItem);
-            } else {
-                this.alivePlayersPanel.appendChild(playerItem);
-            }
+            this.alivePlayersPanel.appendChild(playerItem);
+        });
+        
+        eliminatedPlayers.forEach(player => {
+            const playerItem = document.createElement('div');
+            playerItem.className = 'player-item eliminated';
+            
+            playerItem.innerHTML = `
+                <div class="player-color" style="background-color: ${player.color}"></div>
+                <div class="player-info">
+                    ${player.name}${player.rank ? ` (#${player.rank})` : ''}
+                </div>
+            `;
+            
+            this.eliminatedPlayersPanel.appendChild(playerItem);
         });
     }
     
     updateGameUI(time, escalation) {
         // Обновление таймера
-        const minutes = Math.floor(time / 60).toString().padStart(2, '0');
-        const seconds = (time % 60).toString().padStart(2, '0');
-        this.timerElement.textContent = `${minutes}:${seconds}`;
+        if (typeof time === 'string') {
+            this.timerElement.textContent = time;
+        } else {
+            const minutes = Math.floor(time / 60).toString().padStart(2, '0');
+            const seconds = (time % 60).toString().padStart(2, '0');
+            this.timerElement.textContent = `${minutes}:${seconds}`;
+        }
+        
+        if (this.gameManager && !this.gameManager.isStarted && !this.gameManager.isFinished) {
+            this.escalationIndicator.textContent = '⚡ ОЖИДАНИЕ ⚡';
+            this.escalationIndicator.style.background = '#555';
+            return;
+        }
         
         // Обновление индикатора эскалации
         if (escalation) {

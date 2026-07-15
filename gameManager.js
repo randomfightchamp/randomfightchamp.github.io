@@ -1,13 +1,14 @@
 // Общий менеджер игр (правила, темп, эскалация)
 
 class GameManager {
-    constructor(players, canvas, gameModule, onGameOver, onUpdate) {
+    constructor(players, canvas, gameModule, onGameOver, onUpdate, onPlayersChange) {
         this.players = [...players];
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.gameModule = gameModule;
         this.onGameOver = onGameOver;
         this.onUpdate = onUpdate;
+        this.onPlayersChange = onPlayersChange;
         
         // Состояния игры
         this.startTime = null;
@@ -15,6 +16,8 @@ class GameManager {
         this.isEscalation = false;
         this.deathCooldown = false;
         this.pendingDeaths = [];
+        this.isStarted = false;
+        this.isFinished = false;
         
         // Таймеры
         this.lastTimestamp = 0;
@@ -28,21 +31,59 @@ class GameManager {
     }
     
     init() {
-        this.startTime = Date.now();
-        this.lastDeathTime = Date.now();
+        this.startTime = null;
+        this.lastDeathTime = null;
         this.isEscalation = false;
         this.deathCooldown = false;
         this.pendingDeaths = [];
+        this.isStarted = false;
+        this.isFinished = false;
         
         // Инициализация конкретной игры
         this.gameModule.init(this.canvas, this.players, this.callbacks);
         
-        // Запуск игрового цикла
+        this.updateUI(0);
+        this.drawInitialState();
+        this.notifyPlayersChanged();
+    }
+    
+    start() {
+        if (this.isStarted || this.isFinished) return;
+        
+        this.isStarted = true;
+        this.startTime = Date.now();
+        this.lastDeathTime = Date.now();
+        this.resetGameTimers();
+        
         this.lastTimestamp = performance.now();
-        this.gameLoop();
+        this.animationFrameId = requestAnimationFrame(this.gameLoop.bind(this));
+    }
+    
+    resetGameTimers() {
+        const now = Date.now();
+        if ('prepStartTime' in this.gameModule) {
+            this.gameModule.prepStartTime = now;
+        }
+        if ('roundStartTime' in this.gameModule) {
+            this.gameModule.roundStartTime = now;
+        }
+        if ('lastTime' in this.gameModule) {
+            this.gameModule.lastTime = performance.now();
+        }
+    }
+    
+    drawInitialState() {
+        try {
+            this.gameModule.draw(this.ctx);
+        } catch (error) {
+            console.error('Ошибка в стартовом рендеринге игры:', error);
+            this.handleError(error);
+        }
     }
     
     gameLoop(timestamp) {
+        if (!this.isStarted || this.isFinished) return;
+        
         const dt = (timestamp - this.lastTimestamp) / 1000; // Delta time в секундах
         this.lastTimestamp = timestamp;
         
@@ -84,8 +125,8 @@ class GameManager {
         this.animationFrameId = requestAnimationFrame(this.gameLoop.bind(this));
     }
     
-    updateUI() {
-        const currentTime = (Date.now() - this.startTime) / 1000;
+    updateUI(timeOverride = null) {
+        const currentTime = timeOverride !== null ? timeOverride : (Date.now() - this.startTime) / 1000;
         const timeInMinutes = Math.floor(currentTime / 60);
         const timeInSeconds = Math.floor(currentTime % 60);
         const formattedTime = `${String(timeInMinutes).padStart(2, '0')}:${String(timeInSeconds).padStart(2, '0')}`;
@@ -126,6 +167,14 @@ class GameManager {
             
             // Звуковое уведомление
             this.playEliminationSound();
+            
+            this.notifyPlayersChanged();
+        }
+    }
+    
+    notifyPlayersChanged() {
+        if (this.onPlayersChange) {
+            this.onPlayersChange(this.players);
         }
     }
     
@@ -187,9 +236,7 @@ class GameManager {
         
         // Анимация частиц
         const animateParticles = (timestamp) => {
-            this.ctx.fillStyle = '#0f0f1a';
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-            
+            this.ctx.save();
             particles.forEach((particle, index) => {
                 particle.x += particle.speedX;
                 particle.y += particle.speedY;
@@ -204,7 +251,7 @@ class GameManager {
                 }
             });
             
-            this.ctx.globalAlpha = 1.0;
+            this.ctx.restore();
             
             if (particles.length > 0) {
                 requestAnimationFrame(animateParticles);
@@ -277,6 +324,9 @@ class GameManager {
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
+        this.isFinished = true;
+        this.isStarted = false;
+        this.notifyPlayersChanged();
         
         if (this.onGameOver && winner) {
             this.onGameOver(winner);
@@ -287,6 +337,8 @@ class GameManager {
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
+        this.isStarted = false;
+        this.isFinished = true;
         
         // Очистка игры
         if (this.gameModule.destroy) {

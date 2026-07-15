@@ -63,6 +63,15 @@ h1 {
     box-shadow: 0 5px 15px rgba(0, 255, 204, 0.4);
 }
 
+.btn-primary.disabled,
+.btn-primary:disabled {
+    background-color: #555;
+    color: #bbb;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
 .btn-secondary {
     background-color: #333;
     color: white;
@@ -256,8 +265,34 @@ h1 {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    max-height: 40%;
     overflow-y: auto;
+}
+
+.alive-players {
+    flex: 1;
+}
+
+.eliminated-players {
+    max-height: 35%;
+}
+
+.players-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #aaa;
+    font-size: 0.75rem;
+    font-weight: bold;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.players-divider::before,
+.players-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.25);
 }
 
 .player-item {
